@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>經典踩地雷</title>
+    <style>
+        :root {
+            --bg-color: #f0f2f5;
+            --cell-size: 30px;
+            --cell-bg: #c6c6c6;
+            --cell-opened: #e4e4e4;
+            --border-light: #ffffff;
+            --border-dark: #7b7b7b;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+        }
+
+        h1 { color: #333; margin-bottom: 10px; }
+
+        .controls {
+            margin-bottom: 20px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        button {
+            padding: 8px 16px;
+            cursor: pointer;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+
+        button:hover { background-color: #45a049; }
+
+        .stats {
+            margin-bottom: 10px;
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: #444;
+        }
+
+        #game-board {
+            display: grid;
+            background-color: var(--border-dark);
+            border: 3px solid var(--border-dark);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+            user-select: none;
+        }
+
+        .cell {
+            width: var(--cell-size);
+            height: var(--cell-size);
+            background-color: var(--cell-bg);
+            border: 3px outset var(--border-light);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 18px;
+            cursor: pointer;
+            box-sizing: border-box;
+        }
+
+        .cell.opened {
+            border: 1px solid #bbb;
+            background-color: var(--cell-opened);
+            cursor: default;
+        }
+
+        .cell.mine { background-color: #ff4d4d; }
+        .cell.flagged::after { content: "🚩"; font-size: 14px; }
+        .cell.mine::after { content: "💣"; }
+
+        /* 數字顏色 */
+        .n1 { color: blue; }
+        .n2 { color: green; }
+        .n3 { color: red; }
+        .n4 { color: darkblue; }
+        .n5 { color: darkred; }
+        .n6 { color: teal; }
+        .n7 { color: black; }
+        .n8 { color: gray; }
+    </style>
+</head>
+<body>
+
+    <h1>踩地雷 Minesweeper</h1>
+
+    <div class="controls">
+        <select id="difficulty">
+            <option value="easy">初級 (9x9, 10雷)</option>
+            <option value="medium">中級 (16x16, 40雷)</option>
+            <option value="hard">高級 (30x16, 99雷)</option>
+        </select>
+        <button onclick="initGame()">重新開始</button>
+    </div>
+
+    <div class="stats">
+        剩餘地雷：<span id="mine-count">0</span>
+    </div>
+
+    <div id="game-board"></div>
+
+    <script>
+        const boardElement = document.getElementById('game-board');
+        const mineCountElement = document.getElementById('mine-count');
+        const difficultySelect = document.getElementById('difficulty');
+
+        let rows, cols, mines;
+        let board = [];
+        let minePositions = [];
+        let revealedCount = 0;
+        let flags = 0;
+        let gameOver = false;
+
+        const config = {
+            easy: { r: 9, c: 9, m: 10 },
+            medium: { r: 16, c: 16, m: 40 },
+            hard: { r: 16, c: 30, m: 99 }
+        };
+
+        function initGame() {
+            const diff = config[difficultySelect.value];
+            rows = diff.r;
+            cols = diff.c;
+            mines = diff.m;
+            
+            board = [];
+            minePositions = [];
+            revealedCount = 0;
+            flags = 0;
+            gameOver = false;
+            
+            mineCountElement.innerText = mines;
+            createBoard();
+        }
+
+        function createBoard() {
+            boardElement.innerHTML = '';
+            boardElement.style.gridTemplateColumns = `repeat(${cols}, var(--cell-size))`;
+
+            for (let r = 0; r < rows; r++) {
+                board[r] = [];
+                for (let c = 0; c < cols; c++) {
+                    const cell = document.createElement('div');
+                    cell.classList.add('cell');
+                    cell.dataset.row = r;
+                    cell.dataset.col = c;
+                    
+                    cell.addEventListener('click', () => handleClick(r, c));
+                    cell.addEventListener('contextmenu', (e) => {
+                        e.preventDefault();
+                        handleRightClick(r, c);
+                    });
+
+                    boardElement.appendChild(cell);
+                    board[r][c] = {
+                        mine: false,
+                        opened: false,
+                        flagged: false,
+                        neighborMines: 0,
+                        element: cell
+                    };
+                }
+            }
+            placeMines();
+            calculateNeighbors();
+        }
+
+        function placeMines() {
+            let placed = 0;
+            while (placed < mines) {
+                let r = Math.floor(Math.random() * rows);
+                let c = Math.floor(Math.random() * cols);
+                if (!board[r][c].mine) {
+                    board[r][c].mine = true;
+                    minePositions.push([r, c]);
+                    placed++;
+                }
+            }
+        }
+
+        function calculateNeighbors() {
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    if (board[r][c].mine) continue;
+                    let count = 0;
+                    for (let i = -1; i <= 1; i++) {
+                        for (let j = -1; j <= 1; j++) {
+                            if (board[r + i]?.[c + j]?.mine) count++;
+                        }
+                    }
+                    board[r][c].neighborMines = count;
+                }
+            }
+        }
+
+        function handleClick(r, c) {
+            if (gameOver || board[r][c].opened || board[r][c].flagged) return;
+
+            if (board[r][c].mine) {
+                endGame(false);
+                return;
+            }
+
+            revealCell(r, c);
+
+            if (revealedCount === rows * cols - mines) {
+                endGame(true);
+            }
+        }
+
+        function revealCell(r, c) {
+            const cell = board[r][c];
+            if (cell.opened || cell.flagged) return;
+
+            cell.opened = true;
+            cell.element.classList.add('opened');
+            revealedCount++;
+
+            if (cell.neighborMines > 0) {
+                cell.element.innerText = cell.neighborMines;
+                cell.element.classList.add(`n${cell.neighborMines}`);
+            } else {
+                // 自動展開周圍
+                for (let i = -1; i <= 1; i++) {
+                    for (let j = -1; j <= 1; j++) {
+                        if (board[r + i]?.[c + j]) {
+                            revealCell(r + i, c + j);
+                        }
+                    }
+                }
+            }
+        }
+
+        function handleRightClick(r, c) {
+            if (gameOver || board[r][c].opened) return;
+
+            const cell = board[r][c];
+            if (!cell.flagged && flags < mines) {
+                cell.flagged = true;
+                cell.element.classList.add('flagged');
+                flags++;
+            } else if (cell.flagged) {
+                cell.flagged = false;
+                cell.element.classList.remove('flagged');
+                flags--;
+            }
+            mineCountElement.innerText = mines - flags;
+        }
+
+        function endGame(isWin) {
+            gameOver = true;
+            minePositions.forEach(([r, c]) => {
+                board[r][c].element.classList.add('mine');
+            });
+
+            setTimeout(() => {
+                alert(isWin ? "恭喜！你贏了！🎉" : "碰！踩到地雷了，遊戲結束。💀");
+            }, 100);
+        }
+
+        // 初始化
+        initGame();
+    </script>
+</body>
+</html>
